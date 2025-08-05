@@ -1,4 +1,3 @@
-
 class VoiceAssistant {
   constructor() {
     // WebRTC variables
@@ -6,13 +5,13 @@ class VoiceAssistant {
     this.dc = null;
     this.stream = null;
     this.track = null;
-    
+
     // State variables
     this.isConnected = false;
     this.isRecording = false;
     this.isAISpeaking = false;
     this.isUserSpeaking = false;
-    
+
     // Audio processing
     this.audioContext = null;
     this.analyser = null;
@@ -30,7 +29,7 @@ class VoiceAssistant {
     this.questionStates = {
       YESTERDAY: 0,
       TODAY: 1,
-      BLOCKERS: 2
+      BLOCKERS: 2,
     };
 
     this.loadPreviousDayData();
@@ -43,7 +42,7 @@ class VoiceAssistant {
     this.loadingSpinner = document.getElementById("loadingSpinner");
     this.statusMessage = document.getElementById("statusMessage");
     this.currentMemberDisplay = document.getElementById("currentMemberDisplay");
-    
+
     // Microphone UI Elements
     this.micButton = document.getElementById("micButton");
     this.micIcon = document.getElementById("micIcon");
@@ -52,7 +51,9 @@ class VoiceAssistant {
     this.micStatusText = document.getElementById("micStatusText");
     this.micStatusSubtext = document.getElementById("micStatusSubtext");
     this.aiSpeakingIndicator = document.getElementById("aiSpeakingIndicator");
-    this.userSpeakingIndicator = document.getElementById("userSpeakingIndicator");
+    this.userSpeakingIndicator = document.getElementById(
+      "userSpeakingIndicator"
+    );
 
     this.initializeEventListeners();
   }
@@ -61,15 +62,15 @@ class VoiceAssistant {
   initializeEventListeners() {
     this.startBtn.addEventListener("click", () => this.startConversation());
     this.stopBtn.addEventListener("click", () => this.stopConversation());
-    
+
     // Enhanced mic button click handler
     if (this.micButton) {
       this.micButton.addEventListener("click", () => {
-        console.log(' Mic button clicked');
+        console.log(" Mic button clicked");
         this.toggleMicrophone();
       });
     }
-    
+
     window.addEventListener("beforeunload", () => this.cleanup());
     window.addEventListener("pagehide", () => this.cleanup());
   }
@@ -79,31 +80,33 @@ class VoiceAssistant {
     try {
       this.showLoading(true);
       this.updateStatus("Connecting...", "info");
-      
-      // Get microphone access
-      this.stream = await navigator.mediaDevices.getUserMedia({ 
+
+      // Define constraints
+      const constraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
+          autoGainControl: true,
+        },
+      };
+
+      // Use constraints here
+      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
       this.track = this.stream.getAudioTracks()[0];
-      
+
       // Setup WebRTC and start
       await this.setupWebRTC();
       this.setupAudioAnalysis();
-      
+
       this.isConnected = true;
       this.isRecording = true;
       this.updateUI();
       this.updateStatus("Connected successfully!", "success");
       this.updateCurrentMemberUI();
       this.addMessage("system", "🎤 Standup meeting started!");
-      
+
       // CRITICAL: Start with user speaking (mic unmuted) - NOT AI speaking
       this.startUserSpeaking();
-      
     } catch (error) {
       console.error("Failed to start conversation:", error);
       this.updateStatus("Failed to connect: " + error.message, "error");
@@ -118,15 +121,15 @@ class VoiceAssistant {
     this.waitingForResponse = true;
     this.unmuteMicrophone(); // CRITICAL: Unmute for user to speak first
     this.updateMicrophoneUI(true);
-    this.updateSpeakingIndicator('user');
-    
+    this.updateSpeakingIndicator("user");
+
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
     }
     if (this.userSpeakingIndicator) {
       this.userSpeakingIndicator.classList.remove("hidden");
     }
-    
+
     if (this.micStatusText) {
       this.micStatusText.textContent = "Listening...";
     }
@@ -137,17 +140,17 @@ class VoiceAssistant {
 
   // ===== MICROPHONE CONTROL =====
   muteMicrophone() {
-    if (this.track && this.track.readyState === 'live') {
+    if (this.track && this.track.readyState === "live") {
       this.track.enabled = false;
-      console.log('🔇 Microphone MUTED');
+      console.log("🔇 Microphone MUTED");
       this.updateMicrophoneUI(false);
     }
   }
 
   unmuteMicrophone() {
-    if (this.track && this.track.readyState === 'live') {
+    if (this.track && this.track.readyState === "live") {
       this.track.enabled = true;
-      console.log(' Microphone UNMUTED');
+      console.log("🎤 Microphone UNMUTED");
       this.updateMicrophoneUI(true);
     }
   }
@@ -155,25 +158,27 @@ class VoiceAssistant {
   // NEW: Manual microphone toggle
   toggleMicrophone() {
     if (!this.isConnected) return;
-    
-    console.log('🎤 Manual mic toggle clicked');
-    
-    if (this.track && this.track.readyState === 'live') {
+
+    console.log("🎤 Manual mic toggle clicked");
+
+    if (this.track && this.track.readyState === "live") {
       const isCurrentlyMuted = !this.track.enabled;
-      
+
       if (isCurrentlyMuted) {
         // Only unmute if AI is not speaking and waiting for response
         if (!this.isAISpeaking && this.waitingForResponse) {
-          console.log('🎤 Manually unmuting microphone');
+          console.log("🎤 Manually unmuting microphone");
           this.unmuteMicrophone();
           this.onUserStartSpeaking();
         } else {
-          console.log('❌ Cannot unmute - AI is speaking or not waiting for response');
+          console.log(
+            "❌ Cannot unmute - AI is speaking or not waiting for response"
+          );
           this.updateStatus("Cannot unmute - AI is speaking", "error");
         }
       } else {
         // Mute the microphone
-        console.log('🎤 Manually muting microphone');
+        console.log("🎤 Manually muting microphone");
         this.muteMicrophone();
         this.onUserStopSpeaking();
       }
@@ -182,24 +187,24 @@ class VoiceAssistant {
 
   // ===== AI SPEAKING CONTROL =====
   startAISpeaking() {
-    console.log('🤖 AI started speaking');
+    console.log("🤖 AI started speaking");
     this.isAISpeaking = true;
     this.waitingForResponse = false;
-    
+
     // CRITICAL: Mute microphone when AI starts speaking
     this.muteMicrophone();
-    this.updateSpeakingIndicator('ai');
-    
+    this.updateSpeakingIndicator("ai");
+
     // CRITICAL: Update UI immediately
     this.updateMicrophoneUI(false);
-    
+
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.remove("hidden");
     }
     if (this.userSpeakingIndicator) {
       this.userSpeakingIndicator.classList.add("hidden");
     }
-    
+
     if (this.micStatusText) {
       this.micStatusText.textContent = "AI Speaking...";
     }
@@ -209,21 +214,19 @@ class VoiceAssistant {
   }
 
   stopAISpeaking() {
-    console.log('🤖 AI stopped speaking');
+    console.log("🤖 AI stopped speaking");
     this.isAISpeaking = false;
-    
+
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
     }
-    
+
     // CRITICAL: Unmute when AI stops speaking and is ready to listen
     this.unmuteMicrophone();
     this.waitingForResponse = true;
-    this.updateSpeakingIndicator('user');
-    
-    // CRITICAL: Update UI immediately
+    this.updateSpeakingIndicator("user");
     this.updateMicrophoneUI(true);
-    
+
     if (this.micStatusText) {
       this.micStatusText.textContent = "Listening...";
     }
@@ -235,22 +238,22 @@ class VoiceAssistant {
   // ===== USER SPEAKING CONTROL =====
   onUserStartSpeaking() {
     if (this.isAISpeaking) {
-      console.log('❌ Cannot start user speaking - AI is speaking');
+      console.log("❌ Cannot start user speaking - AI is speaking");
       return;
     }
-    
+
     if (!this.waitingForResponse) {
-      console.log('❌ Cannot start user speaking - not waiting for response');
+      console.log("❌ Cannot start user speaking - not waiting for response");
       return;
     }
-    
-    console.log('👤 User started speaking');
+
+    console.log("👤 User started speaking");
     this.isUserSpeaking = true;
-    this.updateSpeakingIndicator('user');
-    
+    this.updateSpeakingIndicator("user");
+
     // CRITICAL: Update UI immediately
     this.updateMicrophoneUI(true);
-    
+
     if (this.userSpeakingIndicator) {
       this.userSpeakingIndicator.classList.remove("hidden");
     }
@@ -261,20 +264,20 @@ class VoiceAssistant {
 
   onUserStopSpeaking() {
     if (!this.isUserSpeaking) return;
-    
-    console.log('👤 User stopped speaking');
+
+    console.log("👤 User stopped speaking");
     this.isUserSpeaking = false;
-    
+
     if (this.userSpeakingIndicator) {
       this.userSpeakingIndicator.classList.add("hidden");
     }
-    
+
     // CRITICAL: Update UI immediately
     this.updateMicrophoneUI(false);
-    
+
     // Process user response and start AI speaking
     if (this.waitingForResponse && this.lastUserResponse.trim()) {
-      console.log('📝 Processing user response:', this.lastUserResponse);
+      console.log("📝 Processing user response:", this.lastUserResponse);
       this.processUserResponse(this.lastUserResponse);
       this.lastUserResponse = "";
       this.waitingForResponse = false;
@@ -285,8 +288,9 @@ class VoiceAssistant {
   // ===== AUDIO ANALYSIS =====
   setupAudioAnalysis() {
     if (!this.stream) return;
-    
-    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.audioContext = new (window.AudioContext ||
+      window.webkitAudioContext)();
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.8;
@@ -310,9 +314,13 @@ class VoiceAssistant {
       const db = 20 * Math.log10(average / 255);
 
       // Only detect voice when AI is NOT speaking and waiting for user response
-      if (db > this.speakingThreshold && !this.isAISpeaking && this.waitingForResponse) {
+      if (
+        db > this.speakingThreshold &&
+        !this.isAISpeaking &&
+        this.waitingForResponse
+      ) {
         if (!this.isUserSpeaking) {
-          console.log('🎤 Voice detected - starting user speaking');
+          console.log("🎤 Voice detected - starting user speaking");
           this.onUserStartSpeaking();
         }
         if (this.speakingTimeout) {
@@ -320,7 +328,7 @@ class VoiceAssistant {
         }
         this.speakingTimeout = setTimeout(() => {
           if (this.isUserSpeaking) {
-            console.log('🎤 Voice stopped - ending user speaking');
+            console.log("🎤 Voice stopped - ending user speaking");
             this.onUserStopSpeaking();
           }
         }, 2000);
@@ -330,7 +338,7 @@ class VoiceAssistant {
           clearTimeout(this.speakingTimeout);
           this.speakingTimeout = null;
         }
-        console.log('🎤 Voice stopped - ending user speaking');
+        console.log("🎤 Voice stopped - ending user speaking");
         this.onUserStopSpeaking();
       }
 
@@ -343,24 +351,37 @@ class VoiceAssistant {
   // ===== UI UPDATES =====
   updateMicrophoneUI(isActive) {
     if (!this.micButton || !this.micIcon) {
-      console.log('❌ Mic button or icon not found');
+      console.log("❌ Mic button or icon not found");
       return;
     }
-    
-    console.log('🎤 Updating mic UI - isActive:', isActive, 'isUserSpeaking:', this.isUserSpeaking, 'isAISpeaking:', this.isAISpeaking);
-    
+
+    console.log(
+      "🎤 Updating mic UI - isActive:",
+      isActive,
+      "isUserSpeaking:",
+      this.isUserSpeaking,
+      "isAISpeaking:",
+      this.isAISpeaking
+    );
+
     // Remove all existing classes first
-    this.micButton.classList.remove("ring-4", "ring-green-400/50", "ring-red-400/50", "ring-2", "ring-green-400/30");
+    this.micButton.classList.remove(
+      "ring-4",
+      "ring-green-400/50",
+      "ring-red-400/50",
+      "ring-2",
+      "ring-green-400/30"
+    );
     if (this.recordingAnimation) {
       this.recordingAnimation.classList.add("hidden");
     }
     if (this.pulseRing) {
       this.pulseRing.classList.add("hidden");
     }
-    
+
     if (this.isAISpeaking) {
       // AI is speaking - show muted state with red ring
-      console.log('🔴 AI Speaking - showing muted mic');
+      console.log("🔴 AI Speaking - showing muted mic");
       this.micButton.classList.add("ring-4", "ring-red-400/50");
       this.micIcon.innerHTML = `
         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -370,7 +391,7 @@ class VoiceAssistant {
       `;
     } else if (this.isUserSpeaking && this.waitingForResponse) {
       // User is actively speaking - show active state with green ring and animations
-      console.log('🟢 User Speaking - showing active mic with animations');
+      console.log("🟢 User Speaking - showing active mic with animations");
       this.micButton.classList.add("ring-4", "ring-green-400/50");
       if (this.recordingAnimation) {
         this.recordingAnimation.classList.remove("hidden");
@@ -385,7 +406,7 @@ class VoiceAssistant {
       `;
     } else if (this.waitingForResponse && !this.isAISpeaking) {
       // Ready to listen - show standby state with subtle green ring
-      console.log('🟢 Ready to listen - showing standby mic');
+      console.log("🟢 Ready to listen - showing standby mic");
       this.micButton.classList.add("ring-2", "ring-green-400/30");
       this.micIcon.innerHTML = `
         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -394,7 +415,7 @@ class VoiceAssistant {
       `;
     } else {
       // Default muted state - no ring
-      console.log('⚪ Default state - showing muted mic');
+      console.log("⚪ Default state - showing muted mic");
       this.micIcon.innerHTML = `
         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"></path>
@@ -405,12 +426,14 @@ class VoiceAssistant {
   }
 
   updateSpeakingIndicator(speaker) {
-    if (speaker === 'ai') {
+    if (speaker === "ai") {
       if (this.micStatusText) this.micStatusText.textContent = "AI Speaking...";
-      if (this.micStatusSubtext) this.micStatusSubtext.textContent = "Microphone: Muted";
-    } else if (speaker === 'user') {
+      if (this.micStatusSubtext)
+        this.micStatusSubtext.textContent = "Microphone: Muted";
+    } else if (speaker === "user") {
       if (this.micStatusText) this.micStatusText.textContent = "Listening...";
-      if (this.micStatusSubtext) this.micStatusSubtext.textContent = "Speak now or click mic to toggle";
+      if (this.micStatusSubtext)
+        this.micStatusSubtext.textContent = "Speak now or click mic to toggle";
     }
   }
 
@@ -461,7 +484,9 @@ class VoiceAssistant {
     if (!response.ok) throw new Error("Failed to establish connection");
 
     const data = await response.json();
-    await this.pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.sdp }));
+    await this.pc.setRemoteDescription(
+      new RTCSessionDescription({ type: "answer", sdp: data.sdp })
+    );
   }
 
   configureSession() {
@@ -542,52 +567,111 @@ class VoiceAssistant {
             responses: { yesterdayWork: "", todayWork: "", blockers: "" },
           }));
           this.updateSystemPrompt();
+          // Initialize team members list after loading data
+          this.initializeTeamMembersList();
           return;
         }
       }
       this.teamData = [
-        { name: "Jeeva", yesterdayWork: "No previous data", currentQuestionStep: 0, responses: { yesterdayWork: "", todayWork: "", blockers: "" } },
-        { name: "Ajay", yesterdayWork: "No previous data", currentQuestionStep: 0, responses: { yesterdayWork: "", todayWork: "", blockers: "" } },
-        { name: "Mithun", yesterdayWork: "No previous data", currentQuestionStep: 0, responses: { yesterdayWork: "", todayWork: "", blockers: "" } },
+        {
+          name: "Jeeva",
+          yesterdayWork: "No previous data",
+          currentQuestionStep: 0,
+          responses: { yesterdayWork: "", todayWork: "", blockers: "" },
+        },
+        {
+          name: "Ajay",
+          yesterdayWork: "No previous data",
+          currentQuestionStep: 0,
+          responses: { yesterdayWork: "", todayWork: "", blockers: "" },
+        },
+        {
+          name: "Mithun",
+          yesterdayWork: "No previous data",
+          currentQuestionStep: 0,
+          responses: { yesterdayWork: "", todayWork: "", blockers: "" },
+        },
       ];
       this.updateSystemPrompt();
+      // Initialize team members list with default data
+      this.initializeTeamMembersList();
     } catch (error) {
       console.error("Error loading previous day data:", error);
     }
   }
 
   updateSystemPrompt() {
-    const memberList = this.teamData.map(m => `- ${m.name}: ${m.yesterdayWork}`).join('\n');
-    this.systemPrompt = `You are an experienced Scrum Master conducting a daily standup meeting.
-
-Your job is to guide the meeting by going through each team member one by one. The team members and their previous day's work are:
-${memberList}
-
-Start with ${this.teamData[0]?.name}.
-
-For each member, ask only one question at a time from the following three:
-1) What did you work on yesterday? (I know you were working on: ${this.teamData[0]?.yesterdayWork} - can you tell me about your progress on this work and if you're facing any issues?)
-2) What will you work on today?
-3) Are there any blockers or impediments?
-
-When asking about yesterday's work, always reference their specific tasks and ask about progress and any issues they're facing.
-
-Wait for the member to fully answer each question before moving to the next.
-
-Do not combine multiple questions in a single message.
-
-Keep your tone professional and concise.`;
+    const memberList = this.teamData
+      .map((m) => `- ${m.name}: ${m.yesterdayWork}`)
+      .join("\n");
+    this.systemPrompt = `
+      You are an experienced Scrum Master conducting a daily standup meeting.
+      
+      Your job is to guide the meeting by going through each team member one by one.
+      
+      The team members and their previous day's work are:
+      ${memberList}
+      
+      Start with ${this.teamData[0]?.name}.
+      
+      For each member, ask only one question at a time from the following three:
+      
+      1. What did you work on yesterday?
+         - Include: "I know you were working on: {{yesterdayWork}}. Can you tell me about your progress on this work and if you're facing any issues?"
+      
+      2. What will you work on today?
+      
+      3. Are there any blockers or impediments?
+      
+      Strict rules:
+      - ✅ Ask only **one question at a time**.
+      - ✅ Wait for the team member to fully answer before moving to the next question.
+      - ✅ After completing all 3 questions for a member, you **must say**:
+      
+          **"Thanks, {{currentMember}}. Let's move on to {{nextMember}}. Do you want to continue?"**
+      
+      - ✅ Wait for the user to reply with "yes", "ok", or similar confirmation before proceeding.
+      - ❌ Do not automatically continue without confirmation.
+      - ❌ Never combine questions in one message.
+      - ✅ Always reference their task when asking about yesterday's work.
+      
+      Tone:
+      - Be professional, supportive, and concise.
+      - Keep the flow clear and structured: one member at a time, one question at a time.
+      
+      Example flow:
+      ---
+      AI: Hi Jeeva. What did you work on yesterday? I know you were working on: "Today I am Warka." Can you tell me about your progress on this work and if you're facing any issues?
+      
+      User: I completed it.
+      
+      AI: Great to hear that, Jeeva. What will you be working on today?
+      
+      User: A POC related to Scrum Master.
+      
+      AI: Are there any blockers or impediments?
+      
+      User: No blockers.
+      
+      AI: Thanks, Jeeva. Let's move on to Ajay. Do you want to continue?
+      ---
+      `;
   }
 
   // ===== RESPONSE HANDLING =====
   handleAIResponse(message) {
-    console.log('📨 AI Response:', message.type);
-    
-    if (["conversation.item.input_audio_transcription.completed", "audio_transcription.done"].includes(message.type)) {
+    console.log("📨 AI Response:", message.type);
+
+    if (
+      [
+        "conversation.item.input_audio_transcription.completed",
+        "audio_transcription.done",
+      ].includes(message.type)
+    ) {
       if (message.transcript?.trim()) {
         this.lastUserResponse = message.transcript;
         this.addMessage("user", message.transcript);
-        console.log('👤 User transcript received:', message.transcript);
+        console.log("👤 User transcript received:", message.transcript);
         this.startAISpeaking(); // Start AI speaking when user input received
       }
       return;
@@ -596,7 +680,7 @@ Keep your tone professional and concise.`;
     if (message.type === "response.audio_transcript.done") {
       if (message.transcript?.trim()) {
         this.addMessage("assistant", message.transcript);
-        console.log('🤖 AI transcript received:', message.transcript);
+        console.log("🤖 AI transcript received:", message.transcript);
         this.stopAISpeaking(); // Stop AI speaking and allow user to speak
         this.processAIResponse(message.transcript);
       }
@@ -604,7 +688,7 @@ Keep your tone professional and concise.`;
     }
 
     if (message.type === "error") {
-      console.error('❌ AI Error:', message.error);
+      console.error("❌ AI Error:", message.error);
       this.updateStatus("Error: " + message.error.message, "error");
     }
   }
@@ -615,10 +699,10 @@ Keep your tone professional and concise.`;
 
     const questionType = this.getCurrentQuestionType();
     this.trackResponse(current.name, questionType, response);
-    
+
     // Move to next question
     this.currentQuestionStep++;
-    
+
     if (this.currentQuestionStep >= 3) {
       // All questions answered for current member
       this.advanceToNextMember();
@@ -643,7 +727,10 @@ Keep your tone professional and concise.`;
     Keep your response short and direct. Only ask this one question.
     `;
 
-    this.sendData({ type: "session.update", session: { instructions: prompt } });
+    this.sendData({
+      type: "session.update",
+      session: { instructions: prompt },
+    });
   }
 
   processAIResponse(aiTranscript) {
@@ -651,25 +738,41 @@ Keep your tone professional and concise.`;
     if (!current) return;
 
     const transcript = aiTranscript.toLowerCase();
-    
+
     // Check if AI is asking about today's work
-    if (transcript.includes("today") || transcript.includes("work on today") || 
-        transcript.includes("what will you work on today") || transcript.includes("today's plan")) {
+    if (
+      transcript.includes("today") ||
+      transcript.includes("work on today") ||
+      transcript.includes("what will you work on today") ||
+      transcript.includes("today's plan")
+    ) {
       this.currentQuestionStep = this.questionStates.TODAY;
     }
     // Check if AI is asking about blockers
-    else if (transcript.includes("blocker") || transcript.includes("impediment") || 
-             transcript.includes("any blockers") || transcript.includes("impediments")) {
+    else if (
+      transcript.includes("blocker") ||
+      transcript.includes("impediment") ||
+      transcript.includes("any blockers") ||
+      transcript.includes("impediments")
+    ) {
       this.currentQuestionStep = this.questionStates.BLOCKERS;
     }
     // Check if AI is asking about yesterday's work (first question)
-    else if (transcript.includes("yesterday") || transcript.includes("working on") || 
-             transcript.includes("progress") || transcript.includes("issues")) {
+    else if (
+      transcript.includes("yesterday") ||
+      transcript.includes("working on") ||
+      transcript.includes("progress") ||
+      transcript.includes("issues")
+    ) {
       this.currentQuestionStep = this.questionStates.YESTERDAY;
     }
     // Check if AI is moving to next member
-    else if (transcript.includes("thank you") || transcript.includes("next") || 
-             transcript.includes("move on") || transcript.includes("next member")) {
+    else if (
+      transcript.includes("thank you") ||
+      transcript.includes("next") ||
+      transcript.includes("move on") ||
+      transcript.includes("next member")
+    ) {
       this.advanceToNextMember();
     }
   }
@@ -679,122 +782,13 @@ Keep your tone professional and concise.`;
 
     this.currentMemberIndex += 1;
     this.currentQuestionStep = this.questionStates.YESTERDAY;
-
-    if (this.currentMemberIndex < this.teamData.length) {
-      const next = this.teamData[this.currentMemberIndex];
-      next.currentQuestionStep = this.questionStates.YESTERDAY;
-      this.updateCurrentMemberUI();
-
-      const memberList = this.teamData.map(m => `- ${m.name}: ${m.yesterdayWork}`).join('\n');
-    
-
-      const prompt = `
-      You are a professional **Scrum Master AI** conducting a **daily standup meeting via voice** with developers.
-      
-      You must run the meeting strictly and clearly. For each developer, ask the **3 core standup questions** in this exact order:
-      
-      1. What did you do yesterday?
-      2. What will you do today?
-      3. Are there any blockers?
-      
-      ---
-      
-      ## 🔒 RULES
-      
-      - Accept only clear, task-related answers.
-      - If the response is vague, off-topic, sarcastic, or emotional (e.g., “nothing”, “we’ll see”, “tired”, “going out”, “hotel”), do **not accept** it.
-      - Politely repeat the question using new wording — up to **3 times per question**.
-      - If all 3 attempts fail, say:  
-        ➤ “Would you like me to come back to you shortly?”
-      
-      - Never move to the next question or person without a **valid answer**.
-      - Never skip retries or say “thank you” for vague replies.
-      - If a user gives a personal/emotional response (e.g., “I’m not well”), reply empathetically:
-        ➤ “Thanks for sharing. I hope you’re okay. Let’s continue.”  
-        Then **repeat the same question** without skipping.
-      
-      ---
-      
-      ## 🔄 STANDUP FLOW
-      
-      Start with: **${next.name}**  
-      Yesterday’s assigned task: **"${next.yesterdayWork}"**
-      
-      ---
-      
-      ### 🔹 Question 1: YESTERDAY'S WORK
-      
-      Say:  
-      ➡️ “You were working on '${next.yesterdayWork}' yesterday. Could you tell me what progress you made, and if you faced any challenges?”
-      
-      🔁 Retry if unclear:
-      
-      1. “Can you clearly explain what you did yesterday on '${next.yesterdayWork}'?”
-      2. “What part of the task did you complete? Any issues?”
-      3. “Please describe your actual work progress yesterday.”
-      
-      ❗ Still unclear after 3 tries?  
-      ➤ “Would you like me to come back to you shortly?”
-      
-      ---
-      
-      ### 🔹 Question 2: TODAY'S WORK
-      
-      Say:  
-      ➡️ “What are you planning to work on today?”
-      
-      🔁 Retry if vague or unrelated:
-      
-      1. “Please be specific — what task are you focusing on today?”
-      2. “What part of your project are you working on now?”
-      3. “Can you name the exact item or feature you’re targeting today?”
-      
-      ❗ Still unclear?  
-      ➤ “Would you like me to come back to you shortly?”
-      
-      ---
-      
-      ### 🔹 Question 3: BLOCKERS
-      
-      Say:  
-      ➡️ “Are you facing any blockers or obstacles?”
-      
-      🔁 Retry if unclear:
-      
-      1. “Is there anything stopping you from moving forward?”
-      2. “Do you have any technical, coordination, or time issues?”
-      3. “Are there any delays or challenges you want to flag?”
-      
-      ❗ Still unclear?  
-      ➤ “Would you like me to come back to you shortly?”
-      
-      ---
-      
-      ## 🎙️ TONE
-      
-      - Speak with clarity, respect, and discipline.
-      - Keep the meeting focused and efficient.
-      - Use empathy when needed, but never lose structure.
-      - Do not move forward until a valid answer is received.
-      
-      ---
-      
-      🎯 Begin now with **${next.name}**.  
-      🎤 Ask **only the first question**.  
-      Wait for a clear, valid response before continuing.
-      `;
-      
-
-    
-      
-
-      this.sendData({ type: "session.update", session: { instructions: prompt } });
-    } else {
-      this.standupCompleted = true;
-      this.saveCurrentDayData();
-      this.addMessage("system", "✅ Standup completed for all members.");
-      this.updateStatus("Standup finished. Data saved. You may now stop the session.", "success");
-    }
+    // Debug log to verify index change
+    console.log(
+      "advanceToNextMember: currentMemberIndex=",
+      this.currentMemberIndex
+    );
+    // Always update the team member list highlight
+    this.updateCurrentMemberUI();
   }
 
   // ===== UTILITY FUNCTIONS =====
@@ -815,16 +809,106 @@ Keep your tone professional and concise.`;
     const questions = [
       "What did you work on yesterday?",
       "What will you work on today?",
-      "Do you have any blockers or impediments?"
+      "Do you have any blockers or impediments?",
     ];
     return questions[this.currentQuestionStep];
   }
 
+  // NEW: Initialize team members list
+  initializeTeamMembersList() {
+    const teamMembersList = document.getElementById("teamMembersList");
+    if (!teamMembersList) return;
+
+    teamMembersList.innerHTML = "";
+    this.teamData.forEach((member, index) => {
+      const isCurrent = index === this.currentMemberIndex;
+      // Debug log to verify highlight logic
+      console.log(
+        `Rendering member: ${member.name}, index: ${index}, currentMemberIndex: ${this.currentMemberIndex}, isCurrent: ${isCurrent}`
+      );
+      const memberDiv = document.createElement("div");
+      memberDiv.className =
+        "flex items-center gap-3 p-2 rounded-lg transition-all duration-200 " +
+        (isCurrent
+          ? "bg-gradient-to-r from-blue-100 to-purple-100 border-2 border-primary scale-105"
+          : "bg-white border border-gray-200 hover:bg-blue-50") +
+        " cursor-pointer";
+      memberDiv.id = `member-${index}`;
+
+      memberDiv.innerHTML = `
+        <div class="flex items-center gap-3 flex-1">
+          <div class="w-8 h-8 rounded-full shadow-md flex items-center justify-center ${
+            isCurrent
+              ? "bg-gradient-to-br from-primary to-accent"
+              : "bg-gray-200"
+          }">
+            <span class="text-base font-bold ${
+              isCurrent ? "text-white" : "text-primary"
+            }">
+              ${member.name.charAt(0)}
+            </span>
+          </div>
+          <div class="flex-1">
+            <div class="text-sm font-semibold ${
+              isCurrent ? "text-primary" : "text-gray-800"
+            }">
+              ${member.name}
+              ${
+                isCurrent
+                  ? '<span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-white text-xs font-bold animate-pulse">Current</span>'
+                  : ""
+              }
+            </div>
+            <div class="text-xs text-gray-500 truncate">${
+              member.yesterdayWork
+            }</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1">
+          ${
+            isCurrent
+              ? '<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>'
+              : '<span class="w-2 h-2 rounded-full bg-gray-300"></span>'
+          }
+        </div>
+      `;
+      teamMembersList.appendChild(memberDiv);
+    });
+  }
+
   updateCurrentMemberUI() {
     const member = this.teamData[this.currentMemberIndex];
+    // Debug log to verify current member index
+    console.log(
+      "updateCurrentMemberUI: currentMemberIndex=",
+      this.currentMemberIndex,
+      "member=",
+      member ? member.name : null
+    );
+    if (!member) return;
+
+    // Update team members list highlighting
+    this.initializeTeamMembersList();
+
+    // Update current member display
     if (this.currentMemberDisplay) {
       const questionText = this.getCurrentQuestionText();
-      this.currentMemberDisplay.textContent = `🔊 Talking to: ${member.name} (Question ${this.currentQuestionStep + 1}/3)`;
+      this.currentMemberDisplay.textContent = `🎤 ${member.name} - ${questionText}`;
+    }
+
+    // Update question progress
+    this.updateQuestionProgress();
+  }
+
+  // NEW: Update question progress bar
+  updateQuestionProgress() {
+    const questionProgress = document.getElementById("questionProgress");
+    const questionCounter = document.getElementById("questionCounter");
+
+    if (questionProgress && questionCounter) {
+      const progress = ((this.currentQuestionStep + 1) / 3) * 100;
+      questionProgress.style.width = `${progress}%`;
+      questionCounter.textContent = `${this.currentQuestionStep + 1}/3`;
     }
   }
 
@@ -848,58 +932,71 @@ Keep your tone professional and concise.`;
     }`;
 
     if (role === "system") {
-      // System message with centered design
+      // Unique, compact, pill-style system message
       messageDiv.innerHTML = `
-        <div class="bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 rounded-2xl px-4 py-3 shadow-md max-w-sm text-center">
-          <div class="flex items-center justify-center gap-2 mb-1">
-            <span class="text-sm">⚙️</span>
-            <div class="font-medium text-xs opacity-80">System</div>
-            <div class="text-xs opacity-60">${new Date().toLocaleTimeString()}</div>
-          </div>
-          <div class="text-sm leading-relaxed">${this.escapeHtml(content)}</div>
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-gray-200 via-primary/10 to-accent/10 border border-primary/20 shadow-sm mx-auto text-xs font-semibold text-primary">
+          <span class="text-base">⚙️</span>
+          <span>${this.escapeHtml(content)}</span>
+          <span class="ml-2 text-[10px] text-gray-400">${new Date().toLocaleTimeString()}</span>
         </div>
       `;
     } else {
       // User and AI messages with avatars and chat bubbles
       const isUser = role === "user";
-      const avatarClass = isUser 
-        ? "bg-gradient-to-br from-blue-500 to-blue-600" 
+      const avatarClass = isUser
+        ? "bg-gradient-to-br from-blue-500 to-blue-600"
         : "bg-gradient-to-br from-purple-500 to-purple-600";
       const bubbleClass = isUser
         ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl rounded-br-md shadow-lg"
         : "bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-2xl rounded-bl-md shadow-lg";
       const avatarIcon = isUser ? "👤" : "🤖";
       const roleLabel = isUser ? "You" : "AI Assistant";
-      
+
       messageDiv.innerHTML = `
-        ${!isUser ? `
+        ${
+          !isUser
+            ? `
           <div class="w-8 h-8 ${avatarClass} rounded-full flex items-center justify-center shadow-md flex-shrink-0">
             <span class="text-white text-sm">${avatarIcon}</span>
           </div>
-        ` : ''}
+        `
+            : ""
+        }
         <div class="max-w-xs lg:max-w-md">
           <div class="${bubbleClass} p-4 shadow-lg">
             <div class="flex items-center gap-2 mb-2">
               <div class="font-medium text-xs opacity-90">${roleLabel}</div>
               <div class="text-xs opacity-70">${new Date().toLocaleTimeString()}</div>
             </div>
-            <div class="text-sm leading-relaxed">${this.escapeHtml(content)}</div>
+            <div class="text-sm leading-relaxed">${this.escapeHtml(
+              content
+            )}</div>
           </div>
         </div>
-        ${isUser ? `
+        ${
+          isUser
+            ? `
           <div class="w-8 h-8 ${avatarClass} rounded-full flex items-center justify-center shadow-md flex-shrink-0">
             <span class="text-white text-sm">${avatarIcon}</span>
           </div>
-        ` : ''}
+        `
+            : ""
+        }
       `;
     }
-    
+
     this.conversationArea.appendChild(messageDiv);
     this.conversationArea.scrollTop = this.conversationArea.scrollHeight;
   }
 
   escapeHtml(text) {
-    const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+    const map = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+
+      "'": "&#039;",
+    };
     return text.replace(/[&<>"']/g, (m) => map[m]);
   }
 
@@ -956,7 +1053,7 @@ Keep your tone professional and concise.`;
     }
 
     // Stop the microphone track
-    if (this.track && this.track.readyState === 'live') {
+    if (this.track && this.track.readyState === "live") {
       this.track.stop();
       console.log("User microphone track stopped.");
     }
@@ -983,7 +1080,7 @@ Keep your tone professional and concise.`;
     this.updateUI();
     this.updateStatus("Disconnected - Data saved", "info");
     this.addMessage("system", "Conversation ended - Standup data saved");
-    
+
     if (this.micButton) {
       this.micButton.disabled = true;
     }
@@ -992,7 +1089,8 @@ Keep your tone professional and concise.`;
       this.micStatusText.textContent = "Click 'Start Conversation' to begin";
     }
     if (this.micStatusSubtext) {
-      this.micStatusSubtext.textContent = "Microphone will activate automatically";
+      this.micStatusSubtext.textContent =
+        "Microphone will activate automatically";
     }
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
@@ -1011,9 +1109,13 @@ Keep your tone professional and concise.`;
   updateUI() {
     this.startBtn.disabled = this.isConnected;
     this.stopBtn.disabled = !this.isConnected;
-    this.connectionStatus.textContent = this.isConnected ? "Connected" : "Disconnected";
+    this.connectionStatus.textContent = this.isConnected
+      ? "Connected"
+      : "Disconnected";
     this.connectionStatus.className = `px-3 py-1 rounded-full text-sm font-medium ${
-      this.isConnected ? "bg-green-200 text-green-800" : "bg-gray-200 text-gray-700"
+      this.isConnected
+        ? "bg-green-200 text-green-800"
+        : "bg-gray-200 text-gray-700"
     }`;
   }
 

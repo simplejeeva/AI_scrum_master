@@ -1,0 +1,26 @@
+[
+  {
+    "no": 1,
+    "date": "05/08/2025",
+    "name": "jeeva",
+    "yesterday_work": "Today I am Warka.",
+    "today_work": "",
+    "blockers": ""
+  },
+  {
+    "no": 2,
+    "date": "05/08/2025",
+    "name": "ajay",
+    "yesterday_work": "Developing dashboard analytics",
+    "today_work": "",
+    "blockers": ""
+  },
+  {
+    "no": 3,
+    "date": "05/08/2025",
+    "name": "mithun",
+    "yesterday_work": "Okay",
+    "today_work": "",
+    "blockers": ""
+  }
+]
