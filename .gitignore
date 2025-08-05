@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.log
+
+# Django
+*.sqlite3
+db.sqlite3
+*.pot
+*.pyc
+media/
+staticfiles/
+.env
+.env.*
+local_settings.py
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log*
+
+# VS Code
+.vscode/
+.history/
+
+# macOS
+.DS_Store
+
+# PyCharm
+.idea/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# System
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Coverage
+htmlcov/
+.coverage
+.tox/
+.nox/
+.cache/
+coverage.xml
+nosetests.xml
+*.cover
+*.py,cover
+
+# Test Results
+test-results/
+junit/
+
+# Others
+*.bak
+*.swp
+*.swo

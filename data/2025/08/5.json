@@ -1,0 +1,26 @@
+[
+  {
+    "no": 1,
+    "date": "04/08/2025",
+    "name": "jeeva",
+    "yesterday_work": "You",
+    "today_work": "",
+    "blockers": ""
+  },
+  {
+    "no": 2,
+    "date": "04/08/2025",
+    "name": "ajay",
+    "yesterday_work": "That's why I'm good.",
+    "today_work": "as I am completed on this one",
+    "blockers": ""
+  },
+  {
+    "no": 3,
+    "date": "04/08/2025",
+    "name": "mithun",
+    "yesterday_work": "Implementing API endpoints for user management",
+    "today_work": "",
+    "blockers": ""
+  }
+]

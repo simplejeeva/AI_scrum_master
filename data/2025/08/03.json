@@ -1,0 +1,26 @@
+[
+    {
+      "no": 1,
+      "date": "3/08/2025",
+      "name": "jeeva",
+      "yesterday_work": "Project planning and requirements gathering",
+      "today_work": "Working on user authentication module",
+      "blockers": "Need help with API integration"
+    },
+    {
+      "no": 2,
+      "date": "3/08/2025",
+      "name": "ajay",
+      "yesterday_work": "Team meeting and project setup",
+      "today_work": "Developing dashboard analytics",
+      "blockers": "Performance issues with large datasets"
+    },
+    {
+      "no": 3,
+      "date": "3/08/2025",
+      "name": "mithun",
+      "yesterday_work": "Database design planning",
+      "today_work": "Implementing API endpoints for user management",
+      "blockers": "CORS issues in testing"
+    }
+  ]

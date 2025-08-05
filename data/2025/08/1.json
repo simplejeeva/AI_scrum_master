@@ -1,0 +1,26 @@
+[
+  {
+    "no": 1,
+    "date": "04/08/2025",
+    "name": "jeeva",
+    "yesterday_work": "Have it.",
+    "today_work": "Can you use a belt? I think one is better. We can't find a tower here. Oh, there is no range?",
+    "blockers": ""
+  },
+  {
+    "no": 2,
+    "date": "04/08/2025",
+    "name": "ajay",
+    "yesterday_work": "and other",
+    "today_work": "I really don't remember Try again Sorry",
+    "blockers": ""
+  },
+  {
+    "no": 3,
+    "date": "04/08/2025",
+    "name": "mithun",
+    "yesterday_work": "Implementing API endpoints for user management",
+    "today_work": "",
+    "blockers": ""
+  }
+]
