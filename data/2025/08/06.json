@@ -3,24 +3,27 @@
     "no": 1,
     "date": "06/08/2025",
     "name": "jeeva",
-    "yesterday_work": "Hi, I am Jeeva.",
-    "today_work": "And today I am work on some POC related concepts in Scrum Master.",
-    "blockers": "uh... nothing blocks blockers it's fine and everything"
+    "designation": "Frontend Developer",
+    "yesterday_work": "Ah yes, continue.",
+    "today_work": "Today I am working on some sparkwings project related work.",
+    "blockers": "nothing blockers nothing blockers it's fine"
   },
   {
     "no": 2,
     "date": "06/08/2025",
     "name": "ajay",
-    "yesterday_work": "I'm facing some WebRTC connection issue, still I'm working on that.",
-    "today_work": "Today, I work on Creator, AI Manager, Scrap, POC.",
-    "blockers": "It's nothing, it's fine."
+    "designation": "Backend Developer",
+    "yesterday_work": "Nothing blockers, it's fine.",
+    "today_work": "Let's continue",
+    "blockers": "today I'm working on create a like scrum master POC"
   },
   {
     "no": 3,
     "date": "06/08/2025",
     "name": "mithun",
-    "yesterday_work": "Sure.",
-    "today_work": "Today I am work on some spark pins related work.",
-    "blockers": "Yes, I have some blockers, but it's a connection issue"
+    "designation": "UI/UX Designer",
+    "yesterday_work": "Thank you.",
+    "today_work": "Today I am continuing on that work.",
+    "blockers": "No, nothing. It's fine."
   }
 ]

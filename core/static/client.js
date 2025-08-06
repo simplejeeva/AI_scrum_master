@@ -23,6 +23,10 @@ class VoiceAssistant {
     this.calibrationSamples = [];
     this.isCalibrating = false;
     this.voiceDebugEnabled = false;
+    this.autoUnmuteTimeout = null;
+    this.autoUnmuteDelay = 4000; // 4 seconds
+    this.aiSpeechMonitor = null;
+    this.lastAIAudioTime = 0;
 
     // Standup State Management
     this.teamData = [];
@@ -74,14 +78,14 @@ class VoiceAssistant {
   setSpeakingThreshold(threshold) {
     this.speakingThreshold = threshold;
     console.log(`🎤 Speaking threshold set to: ${threshold}dB`);
-    this.addMessage("system", `🎤 Speaking threshold adjusted to: ${threshold}dB`);
+    // Don't show in chat - just log to console
   }
 
   // Enable/disable voice detection debugging
   enableVoiceDebug(enable = true) {
     this.voiceDebugEnabled = enable;
     console.log(`🎤 Voice detection debugging: ${enable ? "enabled" : "disabled"}`);
-    this.addMessage("system", `🎤 Voice debug: ${enable ? "ON" : "OFF"}`);
+    // Don't show in chat - just log to console
   }
 
   // Manual voice detection bypass for testing
@@ -95,6 +99,191 @@ class VoiceAssistant {
         }
       }, 3000);
     }
+  }
+
+  // Manually sync current member with conversation
+  syncCurrentMember() {
+    // First try to detect from recent conversation
+    const detectedMember = this.detectCurrentMemberFromConversation();
+    if (detectedMember !== -1) {
+      console.log(`🔄 Auto-syncing to member: ${this.teamData[detectedMember].name}`);
+      this.currentMemberIndex = detectedMember;
+      this.updateCurrentMemberUI();
+      return detectedMember;
+    }
+    
+    // Fallback: Look at the last few AI messages to determine who we're talking to
+    const messages = this.conversationArea.children;
+    for (let i = messages.length - 1; i >= Math.max(0, messages.length - 3); i--) {
+      const message = messages[i];
+      if (message.textContent.includes("AI Assistant")) {
+        const text = message.textContent.toLowerCase();
+        const mentionedMember = this.findMentionedMember(text);
+        if (mentionedMember !== -1) {
+          console.log(`🔄 Syncing to member: ${this.teamData[mentionedMember].name}`);
+          this.currentMemberIndex = mentionedMember;
+          this.updateCurrentMemberUI();
+          return mentionedMember;
+        }
+      }
+    }
+    return -1;
+  }
+
+  // Fix current member display and status
+  fixCurrentMemberDisplay() {
+    // Check if conversation has ended
+    if (this.isConversationEnded()) {
+      console.log("🎉 Conversation has ended - marking standup as completed");
+      this.standupCompleted = true;
+      this.checkStandupCompletion();
+      return;
+    }
+
+    const current = this.teamData[this.currentMemberIndex];
+    if (!current) {
+      console.log("❌ No current member found, resetting to first member");
+      this.currentMemberIndex = 0;
+      this.updateCurrentMemberUI();
+      return;
+    }
+
+    // Check if we're at the end of the standup
+    if (this.currentMemberIndex >= this.teamData.length) {
+      console.log("🎉 Standup completed - updating display");
+      this.standupCompleted = true;
+      this.updateCurrentMemberUI();
+      return;
+    }
+
+    // Update the display
+    this.updateCurrentMemberUI();
+    console.log(`✅ Fixed current member display: ${current.name}`);
+  }
+
+  // Check if conversation has ended
+  isConversationEnded() {
+    const messages = this.conversationArea.children;
+    if (messages.length === 0) return false;
+    
+    // Look at the last few messages for completion indicators
+    for (let i = Math.max(0, messages.length - 3); i < messages.length; i++) {
+      const message = messages[i];
+      if (message.textContent) {
+        const text = message.textContent.toLowerCase();
+        if (text.includes("have a great day") || 
+            text.includes("take care") ||
+            text.includes("thank you everyone") ||
+            text.includes("concludes our daily standup") ||
+            text.includes("productive day ahead")) {
+          console.log("🎉 Conversation end detected in message");
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Set designation for a team member
+  setMemberDesignation(memberName, designation) {
+    const member = this.teamData.find(m => 
+      m.name.toLowerCase() === memberName.toLowerCase()
+    );
+    
+    if (member) {
+      member.designation = designation;
+      console.log(`🎯 Set designation for ${member.name}: ${designation}`);
+      this.updateCurrentMemberUI();
+      return true;
+    } else {
+      console.log(`❌ Member "${memberName}" not found`);
+      return false;
+    }
+  }
+
+  // Manually set current member by name
+  setCurrentMember(memberName) {
+    const memberIndex = this.teamData.findIndex(m => 
+      m.name.toLowerCase() === memberName.toLowerCase()
+    );
+    
+    if (memberIndex !== -1) {
+      console.log(`🔄 Manually setting current member to: ${this.teamData[memberIndex].name}`);
+      this.currentMemberIndex = memberIndex;
+      this.updateCurrentMemberUI();
+      return true;
+    } else {
+      console.log(`❌ Member "${memberName}" not found. Available members:`, 
+        this.teamData.map(m => m.name));
+      return false;
+    }
+  }
+
+  // Force conversation completion
+  forceConversationCompletion() {
+    console.log("🎉 Forcing conversation completion");
+    this.standupCompleted = true;
+    this.checkStandupCompletion();
+    
+    // Update all UI elements
+    if (this.micStatusText) {
+      this.micStatusText.textContent = "Standup completed";
+    }
+    if (this.micStatusSubtext) {
+      this.micStatusSubtext.textContent = "All team members have been interviewed";
+    }
+    if (this.currentMemberDisplay) {
+      this.currentMemberDisplay.textContent = "✅ Standup completed for all members";
+    }
+    
+    console.log("✅ Conversation completion forced");
+  }
+
+  // Emergency recovery function - call from console if stuck
+  emergencyRecovery() {
+    console.log("🚨 Emergency recovery triggered");
+    
+    // Force stop AI speaking
+    this.isAISpeaking = false;
+    this.isUserSpeaking = false;
+    this.waitingForResponse = true;
+    
+    // Clear all timers
+    if (this.aiSpeechMonitor) {
+      clearTimeout(this.aiSpeechMonitor);
+      this.aiSpeechMonitor = null;
+    }
+    if (this.autoUnmuteTimeout) {
+      clearTimeout(this.autoUnmuteTimeout);
+      this.autoUnmuteTimeout = null;
+    }
+    if (this.speakingTimeout) {
+      clearTimeout(this.speakingTimeout);
+      this.speakingTimeout = null;
+    }
+    
+    // Force unmute microphone
+    this.unmuteMicrophone();
+    
+    // Update UI
+    if (this.aiSpeakingIndicator) {
+      this.aiSpeakingIndicator.classList.add("hidden");
+    }
+    if (this.userSpeakingIndicator) {
+      this.userSpeakingIndicator.classList.remove("hidden");
+    }
+    
+    this.updateMicrophoneUI(false);
+    this.updateSpeakingIndicator("user");
+    
+    if (this.micStatusText) {
+      this.micStatusText.textContent = "Emergency Recovery - Ready to listen";
+    }
+    if (this.micStatusSubtext) {
+      this.micStatusSubtext.textContent = "Microphone is now active - please speak";
+    }
+    
+    console.log("🎤 Emergency recovery complete - microphone is unmuted");
   }
 
   // Get current audio levels for UI display
@@ -234,7 +423,7 @@ class VoiceAssistant {
       this.updateUI();
       this.updateStatus("Connected successfully!", "success");
       this.updateCurrentMemberUI();
-      this.addMessage("system", "🎤 Standup meeting started!");
+      // Don't add system message to chat
 
       // CRITICAL: Start with user speaking (mic unmuted) - NOT AI speaking
       this.startUserSpeaking();
@@ -321,6 +510,13 @@ class VoiceAssistant {
     console.log("🤖 AI started speaking");
     this.isAISpeaking = true;
     this.waitingForResponse = false;
+    this.lastAIAudioTime = Date.now();
+
+    // Clear any existing auto-unmute timer
+    if (this.autoUnmuteTimeout) {
+      clearTimeout(this.autoUnmuteTimeout);
+      this.autoUnmuteTimeout = null;
+    }
 
     // CRITICAL: Mute microphone when AI starts speaking
     this.muteMicrophone();
@@ -342,11 +538,73 @@ class VoiceAssistant {
     if (this.micStatusSubtext) {
       this.micStatusSubtext.textContent = "Microphone: Muted";
     }
+
+    // Start monitoring AI speech to detect when it actually stops
+    this.startAISpeechMonitor();
+  }
+
+  startAISpeechMonitor() {
+    // Clear any existing monitor
+    if (this.aiSpeechMonitor) {
+      clearTimeout(this.aiSpeechMonitor);
+    }
+
+    // Monitor for AI speech timeout (if no audio for 3 seconds, assume AI stopped)
+    this.aiSpeechMonitor = setTimeout(() => {
+      const timeSinceLastAudio = Date.now() - this.lastAIAudioTime;
+      if (timeSinceLastAudio > 3000 && this.isAISpeaking) {
+        console.log("🤖 AI speech timeout detected - forcing stop");
+        this.forceStopAISpeaking();
+      } else if (this.isAISpeaking) {
+        // AI is still speaking, restart the monitor
+        console.log("🤖 AI speech continuing - restarting monitor");
+        this.startAISpeechMonitor();
+      }
+    }, 3500);
+  }
+
+  forceStopAISpeaking() {
+    console.log("🤖 Force stopping AI speaking");
+    this.isAISpeaking = false;
+
+    // Clear the monitor
+    if (this.aiSpeechMonitor) {
+      clearTimeout(this.aiSpeechMonitor);
+      this.aiSpeechMonitor = null;
+    }
+
+    if (this.aiSpeakingIndicator) {
+      this.aiSpeakingIndicator.classList.add("hidden");
+    }
+
+    // FORCE: Unmute microphone and enable user speaking
+    this.unmuteMicrophone();
+    this.waitingForResponse = true;
+    this.updateSpeakingIndicator("user");
+    this.updateMicrophoneUI(false);
+
+    // Start auto-unmute timer
+    this.startAutoUnmuteTimer();
+
+    if (this.micStatusText) {
+      this.micStatusText.textContent = "Ready to listen";
+    }
+    if (this.micStatusSubtext) {
+      this.micStatusSubtext.textContent = "AI stopped - microphone is active";
+    }
+
+    console.log("🎤 Microphone forcefully unmuted after AI timeout");
   }
 
   stopAISpeaking() {
     console.log("🤖 AI stopped speaking");
     this.isAISpeaking = false;
+
+    // Clear the speech monitor
+    if (this.aiSpeechMonitor) {
+      clearTimeout(this.aiSpeechMonitor);
+      this.aiSpeechMonitor = null;
+    }
 
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
@@ -358,11 +616,68 @@ class VoiceAssistant {
     this.updateSpeakingIndicator("user");
     this.updateMicrophoneUI(false);
 
+    // Start auto-unmute timer - if no voice detected in 4 seconds, show user can speak
+    this.startAutoUnmuteTimer();
+
     if (this.micStatusText) {
       this.micStatusText.textContent = "Listening...";
     }
     if (this.micStatusSubtext) {
-      this.micStatusSubtext.textContent = "Speak now or click mic to toggle";
+      this.micStatusSubtext.textContent = "Speak now or mic will auto-activate in 4s";
+    }
+  }
+
+  startAutoUnmuteTimer() {
+    // Clear any existing timer
+    if (this.autoUnmuteTimeout) {
+      clearTimeout(this.autoUnmuteTimeout);
+    }
+
+    // Show countdown in the UI
+    let countdown = this.autoUnmuteDelay / 1000; // Convert to seconds
+    const updateCountdown = () => {
+      if (countdown > 0 && this.autoUnmuteTimeout) {
+        if (this.micStatusSubtext) {
+          this.micStatusSubtext.textContent = `Speak now or mic will auto-activate in ${countdown}s`;
+        }
+        countdown--;
+        setTimeout(updateCountdown, 1000);
+      }
+    };
+    updateCountdown();
+
+    this.autoUnmuteTimeout = setTimeout(() => {
+      if (this.waitingForResponse && !this.isAISpeaking && !this.isUserSpeaking) {
+        console.log("🎤 Auto-unmute: No voice detected for 4 seconds, prompting user to speak");
+        this.forceUserSpeakingMode();
+      }
+    }, this.autoUnmuteDelay);
+  }
+
+  forceUserSpeakingMode() {
+    console.log("🎤 Forcing user speaking mode");
+    
+    // Ensure microphone is unmuted and ready
+    this.unmuteMicrophone();
+    this.waitingForResponse = true;
+    this.isAISpeaking = false;
+    
+    // Update UI to show user can speak
+    this.updateMicrophoneUI(false);
+    this.updateSpeakingIndicator("user");
+    
+    if (this.userSpeakingIndicator) {
+      this.userSpeakingIndicator.classList.remove("hidden");
+    }
+    if (this.aiSpeakingIndicator) {
+      this.aiSpeakingIndicator.classList.add("hidden");
+    }
+    
+    if (this.micStatusText) {
+      this.micStatusText.textContent = "Ready to listen";
+    }
+    if (this.micStatusSubtext) {
+      this.micStatusSubtext.textContent = "Please speak now - microphone is active";
     }
   }
 
@@ -380,6 +695,13 @@ class VoiceAssistant {
 
     console.log("👤 User started speaking");
     this.isUserSpeaking = true;
+    
+    // Clear auto-unmute timer since user is speaking
+    if (this.autoUnmuteTimeout) {
+      clearTimeout(this.autoUnmuteTimeout);
+      this.autoUnmuteTimeout = null;
+    }
+    
     this.updateSpeakingIndicator("user");
 
     // CRITICAL: Update UI immediately
@@ -387,6 +709,9 @@ class VoiceAssistant {
 
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
+    }
+    if (this.userSpeakingIndicator) {
+      this.userSpeakingIndicator.classList.remove("hidden");
     }
   }
 
@@ -437,7 +762,8 @@ class VoiceAssistant {
     if (settings.noiseSuppression) featuresEnabled.push("Noise Suppression");
     if (settings.autoGainControl) featuresEnabled.push("Auto Gain Control");
     
-    this.addMessage("system", `🎤 Audio features enabled: ${featuresEnabled.join(", ")}`);
+    // Log to console instead of showing in chat
+    console.log(`🎤 Audio features enabled: ${featuresEnabled.join(", ")}`);
   }
 
   setupAudioAnalysis() {
@@ -496,7 +822,8 @@ class VoiceAssistant {
     this.isCalibrating = true;
     this.calibrationSamples = [];
     
-    this.addMessage("system", "🎤 Calibrating ambient noise... Please remain quiet for 3 seconds.");
+    // Log to console instead of showing in chat
+    console.log("🎤 Calibrating ambient noise... Please remain quiet for 3 seconds.");
     
     const bufferLength = this.analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -536,7 +863,8 @@ class VoiceAssistant {
       console.log(`🎤 Ambient noise level: ${avgNoise.toFixed(1)}dB`);
       console.log(`🎤 Speaking threshold set to: ${this.speakingThreshold.toFixed(1)}dB`);
       
-      this.addMessage("system", `🎤 Calibration complete! Ambient: ${avgNoise.toFixed(1)}dB, Threshold: ${this.speakingThreshold.toFixed(1)}dB`);
+      // Log to console instead of showing in chat
+      console.log(`🎤 Calibration complete! Ambient: ${avgNoise.toFixed(1)}dB, Threshold: ${this.speakingThreshold.toFixed(1)}dB`);
     }
     
     this.startVoiceDetection();
@@ -796,7 +1124,7 @@ class VoiceAssistant {
 
   setupDataChannel() {
     this.dc.onopen = () => {
-      this.addMessage("system", "Connected to AI assistant");
+      console.log("Connected to AI assistant");
       this.configureSession();
       if (this.micButton) {
         this.micButton.disabled = false;
@@ -820,7 +1148,7 @@ class VoiceAssistant {
     };
 
     this.dc.onclose = () => {
-      this.addMessage("system", "Disconnected from AI assistant");
+      console.log("Disconnected from AI assistant");
       if (this.micButton) {
         this.micButton.disabled = true;
       }
@@ -834,12 +1162,13 @@ class VoiceAssistant {
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data) && data.length > 0) {
-          this.teamData = data.map((item) => ({
-            name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
-            yesterdayWork: item.today_work || item.yesterday_work || "",
-            currentQuestionStep: 0,
-            responses: { yesterdayWork: "", todayWork: "", blockers: "" },
-          }));
+                  this.teamData = data.map((item) => ({
+          name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
+          designation: item.designation || "Team Member",
+          yesterdayWork: item.today_work || item.yesterday_work || "",
+          currentQuestionStep: 0,
+          responses: { yesterdayWork: "", todayWork: "", blockers: "" },
+        }));
           this.updateSystemPrompt();
           // Initialize team members list after loading data
           this.initializeTeamMembersList();
@@ -849,18 +1178,21 @@ class VoiceAssistant {
       this.teamData = [
         {
           name: "Jeeva",
+          designation: "Frontend Developer",
           yesterdayWork: "No previous data",
           currentQuestionStep: 0,
           responses: { yesterdayWork: "", todayWork: "", blockers: "" },
         },
         {
           name: "Ajay",
+          designation: "Backend Developer",
           yesterdayWork: "No previous data",
           currentQuestionStep: 0,
           responses: { yesterdayWork: "", todayWork: "", blockers: "" },
         },
         {
           name: "Mithun",
+          designation: "UI/UX Designer",
           yesterdayWork: "No previous data",
           currentQuestionStep: 0,
           responses: { yesterdayWork: "", todayWork: "", blockers: "" },
@@ -876,7 +1208,7 @@ class VoiceAssistant {
 
   updateSystemPrompt() {
     const memberList = this.teamData
-      .map((m) => `- ${m.name}: ${m.yesterdayWork || "No previous work recorded"}`)
+      .map((m) => `- ${m.name} (${m.designation}): ${m.yesterdayWork || "No previous work recorded"}`)
       .join("\n");
       
     // Get current member context
@@ -952,6 +1284,29 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
       return;
     }
 
+    // Track when AI starts speaking
+    if (message.type === "response.audio.delta") {
+      this.lastAIAudioTime = Date.now(); // Update last audio time
+      if (!this.isAISpeaking) {
+        console.log("🤖 AI audio output detected - starting AI speaking");
+        this.startAISpeaking();
+      } else {
+        // AI is already speaking, just update the timestamp to keep it active
+        console.log("🤖 AI continuing to speak - keeping indicator active");
+      }
+      return;
+    }
+
+    // Track when AI audio buffer stops
+    if (message.type === "response.audio.done" || 
+        (message.type === "response.output_audio_buffer.speech_stopped")) {
+      console.log("🤖 AI audio buffer stopped");
+      if (this.isAISpeaking) {
+        this.stopAISpeaking();
+      }
+      return;
+    }
+
     if (message.type === "response.audio_transcript.done") {
       if (message.transcript?.trim()) {
         this.addMessage("assistant", message.transcript);
@@ -962,9 +1317,22 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
       return;
     }
 
+    // Handle response completion
+    if (message.type === "response.done") {
+      console.log("🤖 AI response completed");
+      if (this.isAISpeaking) {
+        this.stopAISpeaking();
+      }
+      return;
+    }
+
     if (message.type === "error") {
       console.error("❌ AI Error:", message.error);
       this.updateStatus("Error: " + message.error.message, "error");
+      // If there's an error, make sure AI isn't stuck in speaking state
+      if (this.isAISpeaking) {
+        this.stopAISpeaking();
+      }
     }
   }
 
@@ -1018,11 +1386,37 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
   }
 
   processAIResponse(aiTranscript) {
+    const transcript = aiTranscript.toLowerCase();
+    console.log(`🤖 Processing AI response: "${aiTranscript}"`);
+
+    // Check if AI is addressing a specific member by name
+    const mentionedMember = this.findMentionedMember(transcript);
+    if (mentionedMember !== -1 && mentionedMember !== this.currentMemberIndex) {
+      console.log(`🔄 AI is now talking to ${this.teamData[mentionedMember].name}, updating current member index from ${this.currentMemberIndex} to ${mentionedMember}`);
+      this.currentMemberIndex = mentionedMember;
+      this.currentQuestionStep = 0; // Reset to first question for new member
+      this.updateCurrentMemberUI();
+      return;
+    }
+
     const current = this.teamData[this.currentMemberIndex];
     if (!current) return;
 
-    const transcript = aiTranscript.toLowerCase();
-    console.log(`🤖 Processing AI response: "${aiTranscript}"`);
+    // Check if standup is completed
+    if (
+      transcript.includes("concludes our daily standup") ||
+      transcript.includes("thank you everyone") ||
+      transcript.includes("have a productive day") ||
+      transcript.includes("standup is complete") ||
+      transcript.includes("that concludes") ||
+      transcript.includes("have a great day") ||
+      transcript.includes("take care")
+    ) {
+      console.log("🎉 Standup completion detected in AI response");
+      this.standupCompleted = true;
+      this.checkStandupCompletion();
+      return;
+    }
 
     // Check if AI is moving to next member (this should be checked first)
     if (
@@ -1073,6 +1467,45 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
     this.updateCurrentMemberUI();
   }
 
+  // Find which member is mentioned in the AI response
+  findMentionedMember(transcript) {
+    for (let i = 0; i < this.teamData.length; i++) {
+      const memberName = this.teamData[i].name.toLowerCase();
+      if (transcript.includes(memberName)) {
+        console.log(`📝 Found member name "${memberName}" in AI response`);
+        return i;
+      }
+    }
+    return -1; // No member mentioned
+  }
+
+  // Enhanced member detection with conversation analysis
+  detectCurrentMemberFromConversation() {
+    const messages = this.conversationArea.children;
+    const recentMessages = [];
+    
+    // Get last 5 messages
+    for (let i = Math.max(0, messages.length - 5); i < messages.length; i++) {
+      const message = messages[i];
+      if (message.textContent) {
+        recentMessages.push(message.textContent.toLowerCase());
+      }
+    }
+    
+    // Look for member names in recent conversation
+    for (let i = 0; i < this.teamData.length; i++) {
+      const memberName = this.teamData[i].name.toLowerCase();
+      for (const message of recentMessages) {
+        if (message.includes(memberName)) {
+          console.log(`🎯 Detected ${memberName} in recent conversation`);
+          return i;
+        }
+      }
+    }
+    
+    return -1;
+  }
+
   advanceToNextMember() {
     if (this.standupCompleted) return;
 
@@ -1086,13 +1519,37 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
       console.log("🎉 All team members completed! Finishing standup...");
       this.standupCompleted = true;
       this.currentMemberIndex = this.teamData.length - 1; // Keep index valid
-      this.addMessage("system", "🎉 Standup completed for all team members!");
+      console.log("🎉 Standup completed for all team members!");
       this.saveCurrentDayData();
+      this.updateCurrentMemberUI(); // Update UI to show completion
       return;
     }
     
     // Update UI for the new current member
     this.updateCurrentMemberUI();
+  }
+
+  // Check if standup is completed and update UI
+  checkStandupCompletion() {
+    if (this.standupCompleted) {
+      console.log("🎉 Standup is completed - updating UI");
+      
+      // Update status messages
+      if (this.micStatusText) {
+        this.micStatusText.textContent = "Standup completed";
+      }
+      if (this.micStatusSubtext) {
+        this.micStatusSubtext.textContent = "All team members have been interviewed";
+      }
+      
+      // Update current member display without calling updateCurrentMemberUI to avoid recursion
+      if (this.currentMemberDisplay) {
+        this.currentMemberDisplay.textContent = `✅ Standup completed for all members`;
+      }
+      
+      return true;
+    }
+    return false;
   }
 
   // ===== UTILITY FUNCTIONS =====
@@ -1170,7 +1627,7 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
               }
             </div>
             <div class="text-xs text-gray-500 truncate">${
-              member.yesterdayWork
+              member.designation
             }</div>
           </div>
         </div>
@@ -1187,6 +1644,11 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
   }
 
   updateCurrentMemberUI() {
+    // Check if standup is completed first
+    if (this.checkStandupCompletion()) {
+      return;
+    }
+
     const member = this.teamData[this.currentMemberIndex];
     // Debug log to verify current member index
     console.log(
@@ -1203,7 +1665,12 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
     // Update current member display
     if (this.currentMemberDisplay) {
       const questionText = this.getCurrentQuestionText();
-      this.currentMemberDisplay.textContent = `🎤 ${member.name} - ${questionText}`;
+      // Check if standup is completed
+      if (this.standupCompleted) {
+        this.currentMemberDisplay.textContent = `✅ Standup completed for all members`;
+      } else {
+        this.currentMemberDisplay.textContent = `🎤 ${member.name} - ${questionText}`;
+      }
     }
 
     // Update question progress
@@ -1323,6 +1790,7 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
           no: index + 1,
           date: todayStr,
           name: member.name.toLowerCase(),
+          designation: member.designation || "Team Member",
           yesterday_work: member.responses?.yesterdayWork || member.yesterdayWork,
           today_work: member.responses?.todayWork || "",
           blockers: member.responses?.blockers || "",
@@ -1345,7 +1813,7 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
       if (response.ok) {
         const result = await response.json();
         console.log("✅ Data saved successfully:", result);
-        this.addMessage("system", `✅ Standup data saved for ${todayStr}`);
+        console.log(`✅ Standup data saved for ${todayStr}`);
       } else {
         console.error("❌ Failed to save to JSON file, status:", response.status);
         const errorText = await response.text();
@@ -1367,6 +1835,16 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
     if (this.speakingTimeout) {
       clearTimeout(this.speakingTimeout);
       this.speakingTimeout = null;
+    }
+
+    if (this.autoUnmuteTimeout) {
+      clearTimeout(this.autoUnmuteTimeout);
+      this.autoUnmuteTimeout = null;
+    }
+
+    if (this.aiSpeechMonitor) {
+      clearTimeout(this.aiSpeechMonitor);
+      this.aiSpeechMonitor = null;
     }
 
     if (this.audioContext) {
@@ -1416,7 +1894,7 @@ Current member's previous work: "${currentMember?.yesterdayWork || "No previous 
 
     this.updateUI();
     this.updateStatus("Disconnected - Data saved", "info");
-    this.addMessage("system", "Conversation ended - Standup data saved");
+    console.log("Conversation ended - Standup data saved");
 
     if (this.micButton) {
       this.micButton.disabled = true;
@@ -1524,6 +2002,35 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (event.key.toLowerCase() === 'f' && event.ctrlKey) {
       event.preventDefault();
       voiceAssistant.forceVoiceDetection();
+    }
+    
+    // Press 'R' for emergency recovery
+    if (event.key.toLowerCase() === 'r' && event.ctrlKey) {
+      event.preventDefault();
+      voiceAssistant.emergencyRecovery();
+    }
+    
+    // Press 'S' to sync current member
+    if (event.key.toLowerCase() === 's' && event.ctrlKey) {
+      event.preventDefault();
+      const synced = voiceAssistant.syncCurrentMember();
+      if (synced !== -1) {
+        console.log(`✅ Synced to member: ${voiceAssistant.teamData[synced].name}`);
+      } else {
+        console.log("❌ Could not determine current member from conversation");
+      }
+    }
+    
+    // Press 'X' to fix current member display
+    if (event.key.toLowerCase() === 'x' && event.ctrlKey) {
+      event.preventDefault();
+      voiceAssistant.fixCurrentMemberDisplay();
+    }
+    
+    // Press 'C' to force conversation completion
+    if (event.key.toLowerCase() === 'c' && event.ctrlKey) {
+      event.preventDefault();
+      voiceAssistant.forceConversationCompletion();
     }
   });
   

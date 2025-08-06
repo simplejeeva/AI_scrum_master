@@ -3,24 +3,27 @@
     "no": 1,
     "date": "05/08/2025",
     "name": "jeeva",
-    "yesterday_work": "Today I am Warka.",
-    "today_work": "",
-    "blockers": ""
+    "designation": "Frontend Developer",
+    "yesterday_work": "Yes, continue.",
+    "today_work": "Today I am working on some created POC like Scrum Master.",
+    "blockers": "Nothing blockers. It's all fine"
   },
   {
     "no": 2,
     "date": "05/08/2025",
     "name": "ajay",
-    "yesterday_work": "Developing dashboard analytics",
-    "today_work": "",
-    "blockers": ""
+    "designation": "Backend Developer",
+    "yesterday_work": "I'm still working on that issue",
+    "today_work": "Today I am working on some sparkpins project related work.",
+    "blockers": "If nothing blockers, it's nothing blockers"
   },
   {
     "no": 3,
     "date": "05/08/2025",
     "name": "mithun",
-    "yesterday_work": "Okay",
-    "today_work": "",
-    "blockers": ""
+    "designation": "UI/UX Designer",
+    "yesterday_work": "Nothing, thank you.",
+    "today_work": "Today I am working on create a like a master POC",
+    "blockers": "Nothing blockers, it's fine."
   }
 ]
