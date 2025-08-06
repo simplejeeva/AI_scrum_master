@@ -16,8 +16,13 @@ class VoiceAssistant {
     this.audioContext = null;
     this.analyser = null;
     this.microphone = null;
-    this.speakingThreshold = -50;
+    this.gainNode = null;
+    this.speakingThreshold = -45; // Less sensitive threshold
     this.speakingTimeout = null;
+    this.ambientNoiseLevel = -60; // Will be calibrated
+    this.calibrationSamples = [];
+    this.isCalibrating = false;
+    this.voiceDebugEnabled = false;
 
     // Standup State Management
     this.teamData = [];
@@ -58,6 +63,83 @@ class VoiceAssistant {
     this.initializeEventListeners();
   }
 
+  // ===== AUDIO CONTROLS =====
+  setMicrophoneVolume(volume) {
+    if (this.gainNode) {
+      this.gainNode.gain.value = Math.max(0, Math.min(2, volume)); // Clamp between 0 and 2
+      console.log(`🎤 Microphone volume set to: ${this.gainNode.gain.value}`);
+    }
+  }
+
+  setSpeakingThreshold(threshold) {
+    this.speakingThreshold = threshold;
+    console.log(`🎤 Speaking threshold set to: ${threshold}dB`);
+    this.addMessage("system", `🎤 Speaking threshold adjusted to: ${threshold}dB`);
+  }
+
+  // Enable/disable voice detection debugging
+  enableVoiceDebug(enable = true) {
+    this.voiceDebugEnabled = enable;
+    console.log(`🎤 Voice detection debugging: ${enable ? "enabled" : "disabled"}`);
+    this.addMessage("system", `🎤 Voice debug: ${enable ? "ON" : "OFF"}`);
+  }
+
+  // Manual voice detection bypass for testing
+  forceVoiceDetection() {
+    if (this.waitingForResponse && !this.isAISpeaking) {
+      console.log("🎤 Manually triggering voice detection");
+      this.onUserStartSpeaking();
+      setTimeout(() => {
+        if (this.isUserSpeaking) {
+          this.onUserStopSpeaking();
+        }
+      }, 3000);
+    }
+  }
+
+  // Get current audio levels for UI display
+  getCurrentAudioLevel() {
+    if (!this.analyser) return 0;
+    
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    this.analyser.getByteFrequencyData(dataArray);
+    
+    const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+    return 20 * Math.log10(average / 255);
+  }
+
+  // Test audio constraints support
+  static async testAudioConstraints() {
+    try {
+      const testStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      });
+      
+      const track = testStream.getAudioTracks()[0];
+      const capabilities = track.getCapabilities();
+      const settings = track.getSettings();
+      
+      // Clean up test stream
+      testStream.getTracks().forEach(track => track.stop());
+      
+      return {
+        supported: true,
+        capabilities,
+        settings
+      };
+    } catch (error) {
+      return {
+        supported: false,
+        error: error.message
+      };
+    }
+  }
+
   // ===== EVENT LISTENERS =====
   initializeEventListeners() {
     this.startBtn.addEventListener("click", () => this.startConversation());
@@ -81,18 +163,67 @@ class VoiceAssistant {
       this.showLoading(true);
       this.updateStatus("Connecting...", "info");
 
-      // Define constraints
+      // Define enhanced audio constraints for better voice quality
       const constraints = {
         audio: {
+          // Echo Cancellation: Reduces echo in mic input
           echoCancellation: true,
+          
+          // Noise Suppression: Removes background noise
           noiseSuppression: true,
+          
+          // Auto Gain Control: Automatically adjusts microphone volume
           autoGainControl: true,
+          
+          // Additional audio quality settings
+          sampleRate: 48000,        // High quality audio sampling
+          sampleSize: 16,           // 16-bit audio depth
+          channelCount: 1,          // Mono audio (sufficient for voice)
+          
+          // Latency optimization for real-time conversation
+          latency: 0.01,            // 10ms latency target
+          
+          // Volume and quality constraints
+          volume: 1.0,              // Full volume capture
+          
+          // Advanced noise processing (if supported by browser)
+          googEchoCancellation: true,
+          googNoiseSuppression: true,
+          googAutoGainControl: true,
+          googHighpassFilter: true,    // Remove low-frequency noise
+          googTypingNoiseDetection: true, // Reduce keyboard noise
+          googAudioMirroring: false,      // Disable audio mirroring
         },
       };
 
-      // Use constraints here
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-      this.track = this.stream.getAudioTracks()[0];
+      // Use constraints with fallback for better compatibility
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+        this.track = this.stream.getAudioTracks()[0];
+        
+        // Log the actual audio settings that were applied
+        const settings = this.track.getSettings();
+        console.log("🎤 Audio track settings applied:", settings);
+        
+        // Verify key audio features are enabled
+        this.logAudioCapabilities();
+        
+      } catch (error) {
+        console.warn("⚠️ Enhanced audio constraints failed, falling back to basic settings:", error);
+        
+        // Fallback to basic constraints if enhanced ones fail
+        const basicConstraints = {
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        };
+        
+        this.stream = await navigator.mediaDevices.getUserMedia(basicConstraints);
+        this.track = this.stream.getAudioTracks()[0];
+        console.log("🎤 Using basic audio constraints as fallback");
+      }
 
       // Setup WebRTC and start
       await this.setupWebRTC();
@@ -120,7 +251,7 @@ class VoiceAssistant {
     this.isAISpeaking = false;
     this.waitingForResponse = true;
     this.unmuteMicrophone(); // CRITICAL: Unmute for user to speak first
-    this.updateMicrophoneUI(true);
+    this.updateMicrophoneUI(false);
     this.updateSpeakingIndicator("user");
 
     if (this.aiSpeakingIndicator) {
@@ -225,7 +356,7 @@ class VoiceAssistant {
     this.unmuteMicrophone();
     this.waitingForResponse = true;
     this.updateSpeakingIndicator("user");
-    this.updateMicrophoneUI(true);
+    this.updateMicrophoneUI(false);
 
     if (this.micStatusText) {
       this.micStatusText.textContent = "Listening...";
@@ -254,9 +385,6 @@ class VoiceAssistant {
     // CRITICAL: Update UI immediately
     this.updateMicrophoneUI(true);
 
-    if (this.userSpeakingIndicator) {
-      this.userSpeakingIndicator.classList.remove("hidden");
-    }
     if (this.aiSpeakingIndicator) {
       this.aiSpeakingIndicator.classList.add("hidden");
     }
@@ -275,29 +403,142 @@ class VoiceAssistant {
     // CRITICAL: Update UI immediately
     this.updateMicrophoneUI(false);
 
-    // Process user response and start AI speaking
+    // Process user response - but don't start AI speaking yet, 
+    // let the AI transcript processing handle that
     if (this.waitingForResponse && this.lastUserResponse.trim()) {
-      console.log("📝 Processing user response:", this.lastUserResponse);
-      this.processUserResponse(this.lastUserResponse);
-      this.lastUserResponse = "";
-      this.waitingForResponse = false;
-      this.startAISpeaking(); // Start AI speaking again
+      console.log("📝 User response received, waiting for AI processing:", this.lastUserResponse);
+      // Don't clear lastUserResponse here - let handleAIResponse do it
+      // Don't set waitingForResponse to false - let AI response handle the flow
     }
   }
 
-  // ===== AUDIO ANALYSIS =====
+  // ===== AUDIO CAPABILITIES AND ANALYSIS =====
+  logAudioCapabilities() {
+    const capabilities = this.track.getCapabilities();
+    const settings = this.track.getSettings();
+    
+    console.log("🎵 Audio Capabilities:");
+    console.log("  Echo Cancellation:", capabilities.echoCancellation);
+    console.log("  Noise Suppression:", capabilities.noiseSuppression);
+    console.log("  Auto Gain Control:", capabilities.autoGainControl);
+    console.log("  Sample Rate Range:", capabilities.sampleRate);
+    console.log("  Channel Count Range:", capabilities.channelCount);
+    
+    console.log("🎛️ Applied Settings:");
+    console.log("  Echo Cancellation:", settings.echoCancellation);
+    console.log("  Noise Suppression:", settings.noiseSuppression);
+    console.log("  Auto Gain Control:", settings.autoGainControl);
+    console.log("  Sample Rate:", settings.sampleRate);
+    console.log("  Channel Count:", settings.channelCount);
+    
+    // Show user-friendly status
+    const featuresEnabled = [];
+    if (settings.echoCancellation) featuresEnabled.push("Echo Cancellation");
+    if (settings.noiseSuppression) featuresEnabled.push("Noise Suppression");
+    if (settings.autoGainControl) featuresEnabled.push("Auto Gain Control");
+    
+    this.addMessage("system", `🎤 Audio features enabled: ${featuresEnabled.join(", ")}`);
+  }
+
   setupAudioAnalysis() {
     if (!this.stream) return;
 
-    this.audioContext = new (window.AudioContext ||
-      window.webkitAudioContext)();
+    try {
+      // Create audio context with optimized settings
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 48000,        // Match our constraint
+        latencyHint: "interactive" // Optimize for low latency
+      });
+      
+      // Create analyser with optimized settings for voice detection
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 512;           // Higher resolution for better voice detection
+      this.analyser.smoothingTimeConstant = 0.3; // Less smoothing for more responsive detection
+      this.analyser.minDecibels = -90;       // Lower threshold for quiet detection
+      this.analyser.maxDecibels = -10;       // Upper threshold
+      
+      // Create audio processing nodes
+      this.microphone = this.audioContext.createMediaStreamSource(this.stream);
+      
+      // Optional: Add a gain node for volume control
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.gain.value = 1.0; // Default volume
+      
+      // Connect the audio pipeline
+      this.microphone.connect(this.gainNode);
+      this.gainNode.connect(this.analyser);
+      
+      console.log("🎵 Audio analysis setup complete with enhanced voice detection");
+      this.calibrateAmbientNoise();
+      
+    } catch (error) {
+      console.error("❌ Audio analysis setup failed:", error);
+      // Fallback to basic setup
+      this.setupBasicAudioAnalysis();
+    }
+  }
+
+  setupBasicAudioAnalysis() {
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.8;
-
+    
     this.microphone = this.audioContext.createMediaStreamSource(this.stream);
     this.microphone.connect(this.analyser);
+    
+    console.log("🎵 Basic audio analysis setup complete");
+    this.calibrateAmbientNoise();
+  }
 
+  // Calibrate ambient noise to improve voice detection
+  calibrateAmbientNoise() {
+    this.isCalibrating = true;
+    this.calibrationSamples = [];
+    
+    this.addMessage("system", "🎤 Calibrating ambient noise... Please remain quiet for 3 seconds.");
+    
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    let sampleCount = 0;
+    const maxSamples = 60; // 3 seconds at ~20fps
+    
+    const calibrate = () => {
+      if (!this.isConnected || sampleCount >= maxSamples) {
+        this.finishCalibration();
+        return;
+      }
+      
+      this.analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+      const db = 20 * Math.log10(average / 255);
+      
+      this.calibrationSamples.push(db);
+      sampleCount++;
+      
+      requestAnimationFrame(calibrate);
+    };
+    
+    calibrate();
+  }
+  
+  finishCalibration() {
+    this.isCalibrating = false;
+    
+    if (this.calibrationSamples.length > 0) {
+      // Calculate average ambient noise level
+      const avgNoise = this.calibrationSamples.reduce((a, b) => a + b) / this.calibrationSamples.length;
+      
+      // Set threshold 10dB above ambient noise
+      this.ambientNoiseLevel = avgNoise;
+      this.speakingThreshold = Math.max(-50, avgNoise + 12);
+      
+      console.log(`🎤 Ambient noise level: ${avgNoise.toFixed(1)}dB`);
+      console.log(`🎤 Speaking threshold set to: ${this.speakingThreshold.toFixed(1)}dB`);
+      
+      this.addMessage("system", `🎤 Calibration complete! Ambient: ${avgNoise.toFixed(1)}dB, Threshold: ${this.speakingThreshold.toFixed(1)}dB`);
+    }
+    
     this.startVoiceDetection();
   }
 
@@ -305,22 +546,55 @@ class VoiceAssistant {
   startVoiceDetection() {
     const bufferLength = this.analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
+    const frequencyData = new Uint8Array(bufferLength);
 
     const detectVoice = () => {
-      if (!this.isConnected) return;
+      if (!this.isConnected || this.isCalibrating) return;
 
+      // Get both time and frequency domain data for better voice detection
       this.analyser.getByteFrequencyData(dataArray);
+      this.analyser.getByteTimeDomainData(frequencyData);
+      
+      // Calculate average amplitude
       const average = dataArray.reduce((a, b) => a + b) / bufferLength;
       const db = 20 * Math.log10(average / 255);
+      
+      // Calculate voice characteristics for better detection
+      const voiceFrequencyRange = dataArray.slice(10, 85); // Focus on human voice frequencies (300Hz-3400Hz)
+      const voiceAverage = voiceFrequencyRange.reduce((a, b) => a + b) / voiceFrequencyRange.length;
+      const voiceDb = 20 * Math.log10(voiceAverage / 255);
+      
+      // Calculate zero-crossing rate for voice detection
+      let zeroCrossings = 0;
+      for (let i = 1; i < frequencyData.length; i++) {
+        if ((frequencyData[i] >= 128) !== (frequencyData[i - 1] >= 128)) {
+          zeroCrossings++;
+        }
+      }
+      const zeroCrossingRate = zeroCrossings / frequencyData.length;
+      
+      // Enhanced voice detection algorithm with better ambient noise filtering
+      const isVoiceDetected = (
+        db > this.speakingThreshold &&              // General amplitude threshold
+        voiceDb > (this.speakingThreshold + 8) &&   // Voice frequency range threshold (stricter)
+        zeroCrossingRate > 0.02 &&                  // Voice typically has higher zero-crossing rate (stricter)
+        zeroCrossingRate < 0.4 &&                   // But not too high (would be noise)
+        (voiceDb - db) > -10                        // Voice signal should be reasonably strong in voice frequencies
+      );
+
+      // Debug logging for voice detection
+      if (this.voiceDebugEnabled) {
+        console.log(`🎤 Voice Detection - DB: ${db.toFixed(1)}, Voice DB: ${voiceDb.toFixed(1)}, ZCR: ${zeroCrossingRate.toFixed(3)}, Detected: ${isVoiceDetected}, Threshold: ${this.speakingThreshold}`);
+      }
 
       // Only detect voice when AI is NOT speaking and waiting for user response
       if (
-        db > this.speakingThreshold &&
+        isVoiceDetected &&
         !this.isAISpeaking &&
         this.waitingForResponse
       ) {
         if (!this.isUserSpeaking) {
-          console.log("🎤 Voice detected - starting user speaking");
+          console.log("🎤 Enhanced voice detected - starting user speaking");
           this.onUserStartSpeaking();
         }
         if (this.speakingTimeout) {
@@ -331,8 +605,8 @@ class VoiceAssistant {
             console.log("🎤 Voice stopped - ending user speaking");
             this.onUserStopSpeaking();
           }
-        }, 2000);
-      } else if (db <= this.speakingThreshold && this.isUserSpeaking) {
+        }, 1500); // Reduced timeout for more responsive detection
+      } else if (!isVoiceDetected && this.isUserSpeaking) {
         // Voice stopped - clear timeout and stop speaking
         if (this.speakingTimeout) {
           clearTimeout(this.speakingTimeout);
@@ -602,60 +876,57 @@ class VoiceAssistant {
 
   updateSystemPrompt() {
     const memberList = this.teamData
-      .map((m) => `- ${m.name}: ${m.yesterdayWork}`)
+      .map((m) => `- ${m.name}: ${m.yesterdayWork || "No previous work recorded"}`)
       .join("\n");
-    this.systemPrompt = `
-      You are an experienced Scrum Master conducting a daily standup meeting.
       
-      Your job is to guide the meeting by going through each team member one by one.
-      
-      The team members and their previous day's work are:
-      ${memberList}
-      
-      Start with ${this.teamData[0]?.name}.
-      
-      For each member, ask only one question at a time from the following three:
-      
-      1. What did you work on yesterday?
-         - Include: "I know you were working on: {{yesterdayWork}}. Can you tell me about your progress on this work and if you're facing any issues?"
-      
-      2. What will you work on today?
-      
-      3. Are there any blockers or impediments?
-      
-      Strict rules:
-      - ✅ Ask only **one question at a time**.
-      - ✅ Wait for the team member to fully answer before moving to the next question.
-      - ✅ After completing all 3 questions for a member, you **must say**:
-      
-          **"Thanks, {{currentMember}}. Let's move on to {{nextMember}}. Do you want to continue?"**
-      
-      - ✅ Wait for the user to reply with "yes", "ok", or similar confirmation before proceeding.
-      - ❌ Do not automatically continue without confirmation.
-      - ❌ Never combine questions in one message.
-      - ✅ Always reference their task when asking about yesterday's work.
-      
-      Tone:
-      - Be professional, supportive, and concise.
-      - Keep the flow clear and structured: one member at a time, one question at a time.
-      
-      Example flow:
-      ---
-      AI: Hi Jeeva. What did you work on yesterday? I know you were working on: "Today I am Warka." Can you tell me about your progress on this work and if you're facing any issues?
-      
-      User: I completed it.
-      
-      AI: Great to hear that, Jeeva. What will you be working on today?
-      
-      User: A POC related to Scrum Master.
-      
-      AI: Are there any blockers or impediments?
-      
-      User: No blockers.
-      
-      AI: Thanks, Jeeva. Let's move on to Ajay. Do you want to continue?
-      ---
-      `;
+    // Get current member context
+    const currentMember = this.teamData[this.currentMemberIndex];
+    const nextMember = this.teamData[this.currentMemberIndex + 1];
+    
+    this.systemPrompt = `You are an experienced Scrum Master conducting a daily standup meeting.
+
+Your job is to guide the meeting by going through each team member one by one.
+
+The team members and their previous day's work are:
+${memberList}
+
+CURRENT CONTEXT:
+- Currently interviewing: ${currentMember?.name || "First member"}
+- Current question step: ${this.currentQuestionStep + 1}/3
+- Next member: ${nextMember?.name || "None (end of standup)"}
+
+For each member, ask only one question at a time from the following three:
+
+1. What did you work on yesterday?
+   - If they have previous work, reference it: "I know you were working on: [their previous work]. Can you tell me about your progress and any issues?"
+   - If no previous work: "What did you work on yesterday?"
+
+2. What will you work on today?
+
+3. Are there any blockers or impediments?
+
+STRICT RULES:
+- ✅ Ask only ONE question at a time
+- ✅ Wait for the team member to fully answer before moving to the next question
+- ✅ After completing all 3 questions for a member, say: "Thanks, [name]. Let's move on to [next name]. Do you want to continue?"
+- ✅ Wait for confirmation before proceeding to next member
+- ❌ Never combine questions in one message
+- ✅ Always be professional, supportive, and concise
+
+Current member's previous work: "${currentMember?.yesterdayWork || "No previous work recorded"}"`;
+  }
+
+  // Create context-aware prompt for specific situations
+  createContextPrompt(situation, memberName, previousWork) {
+    const contexts = {
+      'first_question': `You are asking ${memberName} about yesterday's work. ${previousWork && previousWork !== "No previous work recorded" 
+        ? `Reference their previous work: "${previousWork}". Ask about their progress and any issues.` 
+        : `Ask what they worked on yesterday.`}`,
+      'transition': `You just finished asking ${memberName} all three standup questions. Thank them and ask to move to the next team member.`,
+      'next_question': `You received ${memberName}'s answer. Now ask them the next standup question in sequence.`
+    };
+    
+    return contexts[situation] || this.systemPrompt;
   }
 
   // ===== RESPONSE HANDLING =====
@@ -672,6 +943,10 @@ class VoiceAssistant {
         this.lastUserResponse = message.transcript;
         this.addMessage("user", message.transcript);
         console.log("👤 User transcript received:", message.transcript);
+        
+        // Process the user response immediately
+        this.processUserResponse(message.transcript);
+        
         this.startAISpeaking(); // Start AI speaking when user input received
       }
       return;
@@ -695,21 +970,30 @@ class VoiceAssistant {
 
   processUserResponse(response) {
     const current = this.teamData[this.currentMemberIndex];
-    if (!current) return;
+    if (!current) {
+      console.log("❌ No current team member found");
+      return;
+    }
 
     const questionType = this.getCurrentQuestionType();
+    console.log(`📝 Saving response for ${current.name} - ${questionType}: "${response}"`);
+    
+    // Save the response to the current member's data
     this.trackResponse(current.name, questionType, response);
 
-    // Move to next question
+    // Move to next question for this member
     this.currentQuestionStep++;
+    
+    console.log(`📊 Question step advanced to: ${this.currentQuestionStep}/3 for member: ${current.name}`);
 
     if (this.currentQuestionStep >= 3) {
       // All questions answered for current member
+      console.log(`✅ All questions completed for ${current.name}`);
       this.advanceToNextMember();
-    } else {
-      // Ask next question
-      this.askNextQuestion();
     }
+    
+    // Update UI to reflect current state
+    this.updateCurrentMemberUI();
   }
 
   askNextQuestion() {
@@ -738,6 +1022,21 @@ class VoiceAssistant {
     if (!current) return;
 
     const transcript = aiTranscript.toLowerCase();
+    console.log(`🤖 Processing AI response: "${aiTranscript}"`);
+
+    // Check if AI is moving to next member (this should be checked first)
+    if (
+      transcript.includes("thank") ||
+      transcript.includes("thanks") ||
+      transcript.includes("next") ||
+      transcript.includes("move on") ||
+      transcript.includes("continue") ||
+      transcript.includes("next member")
+    ) {
+      console.log("🔄 AI is transitioning to next member");
+      // Don't advance here - let the confirmation process handle it
+      return;
+    }
 
     // Check if AI is asking about today's work
     if (
@@ -746,6 +1045,7 @@ class VoiceAssistant {
       transcript.includes("what will you work on today") ||
       transcript.includes("today's plan")
     ) {
+      console.log("📅 AI is asking about today's work");
       this.currentQuestionStep = this.questionStates.TODAY;
     }
     // Check if AI is asking about blockers
@@ -755,6 +1055,7 @@ class VoiceAssistant {
       transcript.includes("any blockers") ||
       transcript.includes("impediments")
     ) {
+      console.log("🚧 AI is asking about blockers");
       this.currentQuestionStep = this.questionStates.BLOCKERS;
     }
     // Check if AI is asking about yesterday's work (first question)
@@ -764,17 +1065,12 @@ class VoiceAssistant {
       transcript.includes("progress") ||
       transcript.includes("issues")
     ) {
+      console.log("📊 AI is asking about yesterday's work");
       this.currentQuestionStep = this.questionStates.YESTERDAY;
     }
-    // Check if AI is moving to next member
-    else if (
-      transcript.includes("thank you") ||
-      transcript.includes("next") ||
-      transcript.includes("move on") ||
-      transcript.includes("next member")
-    ) {
-      this.advanceToNextMember();
-    }
+
+    // Update UI to reflect current state
+    this.updateCurrentMemberUI();
   }
 
   advanceToNextMember() {
@@ -782,12 +1078,20 @@ class VoiceAssistant {
 
     this.currentMemberIndex += 1;
     this.currentQuestionStep = this.questionStates.YESTERDAY;
-    // Debug log to verify index change
-    console.log(
-      "advanceToNextMember: currentMemberIndex=",
-      this.currentMemberIndex
-    );
-    // Always update the team member list highlight
+    
+    console.log(`🔄 Advanced to member index: ${this.currentMemberIndex}/${this.teamData.length}`);
+    
+    // Check if we've completed all members
+    if (this.currentMemberIndex >= this.teamData.length) {
+      console.log("🎉 All team members completed! Finishing standup...");
+      this.standupCompleted = true;
+      this.currentMemberIndex = this.teamData.length - 1; // Keep index valid
+      this.addMessage("system", "🎉 Standup completed for all team members!");
+      this.saveCurrentDayData();
+      return;
+    }
+    
+    // Update UI for the new current member
     this.updateCurrentMemberUI();
   }
 
@@ -795,8 +1099,14 @@ class VoiceAssistant {
   trackResponse(memberName, questionType, response) {
     const member = this.teamData.find((m) => m.name === memberName);
     if (member) {
-      member.responses[questionType] = response;
-      console.log(`Tracked ${questionType} for ${memberName}: "${response}"`);
+      if (!member.responses) {
+        member.responses = { yesterdayWork: "", todayWork: "", blockers: "" };
+      }
+      member.responses[questionType] = response.trim();
+      console.log(`✅ Tracked ${questionType} for ${memberName}: "${response}"`);
+      console.log(`📋 Current responses for ${memberName}:`, member.responses);
+    } else {
+      console.error(`❌ Member ${memberName} not found in team data`);
     }
   }
 
@@ -1005,14 +1315,23 @@ class VoiceAssistant {
       const today = new Date();
       const todayStr = today.toLocaleDateString("en-GB").replace(/-/g, "/");
 
-      const jsonData = this.teamData.map((member, index) => ({
-        no: index + 1,
-        date: todayStr,
-        name: member.name.toLowerCase(),
-        yesterday_work: member.responses.yesterdayWork || member.yesterdayWork,
-        today_work: member.responses.todayWork || "",
-        blockers: member.responses.blockers || "",
-      }));
+      console.log("💾 Preparing to save standup data...");
+      console.log("📊 Current team data:", this.teamData);
+
+      const jsonData = this.teamData.map((member, index) => {
+        const data = {
+          no: index + 1,
+          date: todayStr,
+          name: member.name.toLowerCase(),
+          yesterday_work: member.responses?.yesterdayWork || member.yesterdayWork,
+          today_work: member.responses?.todayWork || "",
+          blockers: member.responses?.blockers || "",
+        };
+        console.log(`📝 Member ${member.name} data:`, data);
+        return data;
+      });
+
+      console.log("📤 Sending data to server:", jsonData);
 
       const response = await fetch("/save-standup-data/", {
         method: "POST",
@@ -1025,9 +1344,12 @@ class VoiceAssistant {
 
       if (response.ok) {
         const result = await response.json();
+        console.log("✅ Data saved successfully:", result);
         this.addMessage("system", `✅ Standup data saved for ${todayStr}`);
       } else {
-        console.error("❌ Failed to save to JSON file");
+        console.error("❌ Failed to save to JSON file, status:", response.status);
+        const errorText = await response.text();
+        console.error("❌ Error response:", errorText);
       }
     } catch (error) {
       console.error("❌ Error saving standup data:", error);
@@ -1048,8 +1370,23 @@ class VoiceAssistant {
     }
 
     if (this.audioContext) {
+      // Clean up audio nodes
+      if (this.gainNode) {
+        this.gainNode.disconnect();
+        this.gainNode = null;
+      }
+      if (this.microphone) {
+        this.microphone.disconnect();
+        this.microphone = null;
+      }
+      if (this.analyser) {
+        this.analyser.disconnect();
+        this.analyser = null;
+      }
+      
       this.audioContext.close();
       this.audioContext = null;
+      console.log("🎵 Audio context and nodes cleaned up");
     }
 
     // Stop the microphone track
@@ -1152,6 +1489,44 @@ class VoiceAssistant {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  new VoiceAssistant();
+document.addEventListener("DOMContentLoaded", async () => {
+  // Test audio constraints support on page load
+  const audioTest = await VoiceAssistant.testAudioConstraints();
+  console.log("🎤 Audio Constraints Test Result:", audioTest);
+  
+  // Create the voice assistant instance
+  const voiceAssistant = new VoiceAssistant();
+  
+  // Optional: Add keyboard shortcuts for audio control
+  document.addEventListener("keydown", (event) => {
+    // Press 'M' to toggle microphone volume between normal and boosted
+    if (event.key.toLowerCase() === 'm' && event.ctrlKey) {
+      event.preventDefault();
+      const currentLevel = voiceAssistant.gainNode?.gain.value || 1.0;
+      const newLevel = currentLevel >= 1.5 ? 1.0 : 1.5;
+      voiceAssistant.setMicrophoneVolume(newLevel);
+    }
+    
+    // Press 'T' to adjust speaking threshold
+    if (event.key.toLowerCase() === 't' && event.ctrlKey) {
+      event.preventDefault();
+      const newThreshold = voiceAssistant.speakingThreshold <= -45 ? -35 : -45;
+      voiceAssistant.setSpeakingThreshold(newThreshold);
+    }
+    
+    // Press 'D' to toggle voice detection debugging
+    if (event.key.toLowerCase() === 'd' && event.ctrlKey) {
+      event.preventDefault();
+      voiceAssistant.enableVoiceDebug(!voiceAssistant.voiceDebugEnabled);
+    }
+    
+    // Press 'F' to force voice detection (for testing)
+    if (event.key.toLowerCase() === 'f' && event.ctrlKey) {
+      event.preventDefault();
+      voiceAssistant.forceVoiceDetection();
+    }
+  });
+  
+  // Make it globally accessible for debugging
+  window.voiceAssistant = voiceAssistant;
 });
